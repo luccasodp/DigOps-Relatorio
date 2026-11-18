@@ -1,0 +1,10 @@
+{
+  "name": "painel-operacoes-digital",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "jose": "^5.9.6"
+  }
+}

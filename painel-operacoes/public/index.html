@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel Operações Digital</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --acc:#38bdf8; --bom:#4ade80; --ruim:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
+           padding:14px 24px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; }
+  .dir { display:flex; gap:10px; align-items:center; color:var(--mut); font-size:13px; }
+  button, select { background:var(--card); color:var(--txt); border:1px solid var(--line);
+                   border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  nav { display:flex; flex-wrap:wrap; gap:6px; padding:14px 24px 0; }
+  nav button.ativa { background:var(--acc); color:#082f49; border-color:var(--acc); font-weight:600; }
+  main { padding:18px 24px 40px; max-width:1400px; margin:0 auto; }
+  .barra { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; color:var(--mut); font-size:13px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin-bottom:18px; }
+  .kpi { background:var(--card); border-radius:12px; padding:14px 16px; }
+  .kpi .rot { color:var(--mut); font-size:12px; }
+  .kpi .val { font-size:24px; font-weight:650; margin:4px 0 2px; }
+  .kpi .var { font-size:12px; color:var(--mut); }
+  .kpi .var.bom { color:var(--bom); } .kpi .var.ruim { color:var(--ruim); }
+  .graficos { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:14px; margin-bottom:18px; }
+  .gcard { background:var(--card); border-radius:12px; padding:14px 16px; }
+  .gcard h3 { font-size:13px; margin:0 0 10px; color:var(--mut); font-weight:600; }
+  .gcard .wrap { position:relative; height:260px; }
+  .tabela { background:var(--card); border-radius:12px; padding:6px 0; overflow:auto; max-height:420px; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; }
+  th, td { padding:8px 14px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--line); }
+  th { position:sticky; top:0; background:var(--card); color:var(--mut); font-weight:600; }
+  th:first-child, td:first-child { text-align:left; }
+  #msg { padding:40px; text-align:center; color:var(--mut); }
+  #msg.erro { color:var(--ruim); }
+  @media (max-width:520px) { .graficos { grid-template-columns:1fr; } header, nav, main { padding-left:14px; padding-right:14px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Painel Operações Digital</h1>
+  <div class="dir">
+    <span id="usuario"></span>
+    <button id="btnAtualizar">Atualizar</button>
+    <button id="btnSair">Sair</button>
+  </div>
+</header>
+<nav id="abas"></nav>
+<main>
+  <div class="barra">
+    <span id="info"></span>
+    <label>Período:
+      <select id="periodo">
+        <option value="30">30 dias</option>
+        <option value="90" selected>90 dias</option>
+        <option value="180">180 dias</option>
+        <option value="365">1 ano</option>
+        <option value="0">Tudo</option>
+      </select>
+    </label>
+  </div>
+  <div id="msg">Carregando…</div>
+  <div id="conteudo" hidden>
+    <div class="kpis" id="kpis"></div>
+    <div class="graficos" id="graficos"></div>
+    <div class="tabela"><table id="tabela"></table></div>
+  </div>
+</main>
+
+<script>
+// ============ Configuração de cada aba ============
+// ruim: "alto" = subir é ruim (cancelamento) | "baixo" = cair é ruim (nota) | omitido = neutro
+const ABAS = [
+  { id:"ml", nome:"Mercado Livre",
+    kpis:[ {c:"Vendas",t:"num"}, {c:"Receita",t:"moeda"}, {c:"Reclamações",t:"num",ruim:"alto"},
+           {c:"% Reclam",t:"pct",ruim:"alto"}, {c:"% Med",t:"pct",ruim:"alto"},
+           {c:"% Cancelado",t:"pct",ruim:"alto"}, {c:"Tempo médio de resposta",t:"num",ruim:"alto"} ],
+    graficos:[ {titulo:"Vendas", s:["Vendas","Concluídas"], t:"num"},
+               {titulo:"Indicadores de problema", s:["% Reclam","% Med","% Cancelado"], t:"pct"} ] },
+  { id:"magalu", nome:"Magalu",
+    kpis:[ {c:"Reputação geral",t:"num",ruim:"baixo"}, {c:"Pedidos",t:"num"},
+           {c:"% Entregues",t:"pct",ruim:"baixo"}, {c:"%Cancelamentos",t:"pct",ruim:"alto"},
+           {c:"% Agilidade",t:"pct",ruim:"baixo"} ],
+    graficos:[ {titulo:"Reputação geral", s:["Reputação geral"], t:"num"},
+               {titulo:"Indicadores", s:["% Entregues","%Cancelamentos","% Agilidade"], t:"pct"} ] },
+  { id:"amazon", nome:"Amazon",
+    kpis:[ {c:"Estado da conta",t:"num",ruim:"baixo"}, {c:"Pedidos com problemas",t:"num",ruim:"alto"},
+           {c:"% Problemas",t:"pct",ruim:"alto"}, {c:"Garantia de A a Z",t:"num",ruim:"alto"},
+           {c:"Avaliações negativas",t:"num",ruim:"alto"}, {c:"% Envios tardios",t:"pct",ruim:"alto"} ],
+    graficos:[ {titulo:"Estado da conta", s:["Estado da conta"], t:"num"},
+               {titulo:"Indicadores", s:["% Problemas","% Envios tardios"], t:"pct"} ] },
+  { id:"americanas", nome:"Americanas",
+    kpis:[ {c:"Performance Geral",t:"num",ruim:"baixo"}, {c:"Cancelados",t:"num",ruim:"alto"},
+           {c:"Atraso na expedição",t:"num",ruim:"alto"} ],
+    graficos:[ {titulo:"Evolução", s:["Performance Geral","Cancelados","Atraso na expedição"], t:"num"} ] },
+  { id:"shopee", nome:"Shopee",
+    kpis:[ {c:"Desempenho da loja",t:"txt"}, {c:"Status",t:"txt"},
+           {c:"Pontos penalidade",t:"num",ruim:"alto"}, {c:"Não Cumprimento",t:"pct",ruim:"alto"},
+           {c:"Avaliação da Loja",t:"num",ruim:"baixo"} ],
+    graficos:[ {titulo:"Pontos de penalidade", s:["Pontos penalidade"], t:"num"},
+               {titulo:"Avaliação da loja", s:["Avaliação da Loja"], t:"num"} ] },
+  { id:"webcontinental", nome:"Web Continental",
+    kpis:[ {c:"Nota",t:"num",ruim:"baixo"}, {c:"Envio no Prazo",t:"pct",ruim:"baixo"},
+           {c:"Entrega no Prazo",t:"pct",ruim:"baixo"}, {c:"Cancelamento",t:"pct",ruim:"alto"},
+           {c:"Sac",t:"pct",ruim:"alto"} ],
+    graficos:[ {titulo:"Nota", s:["Nota"], t:"num"},
+               {titulo:"Indicadores", s:["Envio no Prazo","Entrega no Prazo","Cancelamento","Sac"], t:"pct"} ] },
+  { id:"viavarejo", nome:"Casas Bahia (Via)",
+    kpis:[ {c:"Nota da loja",t:"num",ruim:"baixo"}, {c:"Pedidos",t:"num"},
+           {c:"Expedidos com atraso",t:"num",ruim:"alto"}, {c:"% Atraso",t:"pct",ruim:"alto"},
+           {c:"% Reclamação",t:"pct",ruim:"alto"}, {c:"% Cancelamento",t:"pct",ruim:"alto"} ],
+    graficos:[ {titulo:"Nota da loja", s:["Nota da loja"], t:"num"},
+               {titulo:"Indicadores", s:["% Atraso","% Reclamação","% Cancelamento"], t:"pct"} ] },
+  { id:"leroy", nome:"Leroy Merlin",
+    kpis:[ {c:"Incidentes (< 0.05%)",t:"num",ruim:"alto"}, {c:"Tempo de resposta (< 24h)",t:"num",ruim:"alto"},
+           {c:"Envios tardios (< 3%)",t:"num",ruim:"alto"}, {c:"Reembolso (< 5%)",t:"num",ruim:"alto"},
+           {c:"Reputação total na consulta",t:"num",ruim:"baixo"} ],
+    graficos:[ {titulo:"Incidentes, atrasos e reembolso", s:["Incidentes (< 0.05%)","Envios tardios (< 3%)","Reembolso (< 5%)"], t:"num"},
+               {titulo:"Tempo de resposta (h)", s:["Tempo de resposta (< 24h)"], t:"num"} ] },
+  { id:"reclameaqui", nome:"Reclame Aqui",
+    kpis:[ {c:"Qtd de reclamações",t:"num",ruim:"alto"}, {c:"Nota do consumidor",t:"num",ruim:"baixo"},
+           {c:"Nota da Loja",t:"num",ruim:"baixo"}, {c:"Índice de solução",t:"pct",ruim:"baixo"},
+           {c:"Reclamações respondidas",t:"pct",ruim:"baixo"}, {c:"Voltariam a fazer negócio",t:"pct",ruim:"baixo"},
+           {c:"Tempo de resposta",t:"txt"} ],
+    graficos:[ {titulo:"Notas", s:["Nota do consumidor","Nota da Loja"], t:"num"},
+               {titulo:"Índices", s:["Índice de solução","Reclamações respondidas","Voltariam a fazer negócio"], t:"pct"} ] },
+];
+
+// ============ Utilidades ============
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const FMT = {
+  num:   (v) => Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 2 }),
+  pct:   (v) => (Number(v) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%",
+  moeda: (v) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }),
+  txt:   (v) => String(v),
+};
+const fmtVal = (t, v) => (v === null || v === undefined ? "–" : typeof v === "number" ? FMT[t === "txt" ? "num" : t](v) : String(v));
+const dataBR = (iso) => iso.split("-").reverse().join("/");
+const CORES = ["#38bdf8", "#4ade80", "#fbbf24", "#f87171"];
+
+let abaAtual = ABAS[0].id, graficos = [], cache = {};
+
+function sair401() { location.href = "/login"; }
+
+async function carregar(id, dias, forcar) {
+  const chave = id + ":" + dias;
+  if (!forcar && cache[chave]) return cache[chave];
+  const r = await fetch(`/api/dados?aba=${id}&dias=${dias}`, { cache: forcar ? "reload" : "default" });
+  if (r.status === 401) { sair401(); throw new Error("sessão expirada"); }
+  if (!r.ok) throw new Error("Não foi possível ler a planilha agora.");
+  return (cache[chave] = await r.json());
+}
+
+// último e penúltimo valor não-nulos de uma coluna
+function ultimos(linhas, col) {
+  const vals = [];
+  for (let i = linhas.length - 1; i >= 0 && vals.length < 2; i--) {
+    const v = linhas[i][col];
+    if (v !== null && v !== undefined) vals.push(v);
+  }
+  return vals; // [atual, anterior]
+}
+
+function renderKpis(cfg, linhas) {
+  $("kpis").innerHTML = cfg.kpis.map((k) => {
+    const [atual, ant] = ultimos(linhas, k.c);
+    let varHtml = "";
+    if (typeof atual === "number" && typeof ant === "number" && atual !== ant) {
+      const d = atual - ant, sobe = d > 0;
+      let cls = "";
+      if (k.ruim) cls = (k.ruim === "alto") === sobe ? "ruim" : "bom";
+      const dTxt = k.t === "pct" ? (d * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2, signDisplay: "always" }) + " p.p."
+                                 : d.toLocaleString("pt-BR", { maximumFractionDigits: 2, signDisplay: "always" });
+      varHtml = `<div class="var ${cls}">${sobe ? "▲" : "▼"} ${esc(dTxt)} vs. anterior</div>`;
+    } else if (typeof atual === "number") {
+      varHtml = `<div class="var">sem variação</div>`;
+    }
+    return `<div class="kpi"><div class="rot">${esc(k.c)}</div><div class="val">${esc(fmtVal(k.t, atual))}</div>${varHtml}</div>`;
+  }).join("");
+}
+
+function renderGraficos(cfg, linhas) {
+  graficos.forEach((g) => g.destroy());
+  graficos = [];
+  $("graficos").innerHTML = cfg.graficos.map((g, i) =>
+    `<div class="gcard"><h3>${esc(g.titulo)}</h3><div class="wrap"><canvas id="g${i}"></canvas></div></div>`).join("");
+
+  const rotulos = linhas.map((l) => dataBR(l.Data) + (l.Turno ? " " + String(l.Turno)[0] : ""));
+  cfg.graficos.forEach((g, i) => {
+    graficos.push(new Chart($("g" + i), {
+      type: "line",
+      data: {
+        labels: rotulos,
+        datasets: g.s.map((col, j) => ({
+          label: col, data: linhas.map((l) => l[col] ?? null),
+          borderColor: CORES[j % CORES.length], backgroundColor: CORES[j % CORES.length],
+          borderWidth: 2, pointRadius: linhas.length > 120 ? 0 : 2, tension: .25, spanGaps: true,
+        })),
+      },
+      options: {
+        maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: g.s.length > 1, labels: { color: "#94a3b8", boxWidth: 12 } },
+          tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${fmtVal(g.t, c.parsed.y)}` } },
+        },
+        scales: {
+          x: { ticks: { color: "#94a3b8", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#273449" } },
+          y: { ticks: { color: "#94a3b8", callback: (v) => fmtVal(g.t, v) }, grid: { color: "#273449" } },
+        },
+      },
+    }));
+  });
+}
+
+function renderTabela(colunas, linhas) {
+  const ult = linhas.slice(-20).reverse();
+  const cols = colunas.filter((c) => ult.some((l) => l[c] !== null && l[c] !== undefined));
+  const ehPct = (c) => /^%|%$/.test(c) || ["Envio no Prazo","Entrega no Prazo","Cancelamento","Sac","Índice de solução","Reclamações respondidas","Voltariam a fazer negócio","Não Cumprimento"].includes(c);
+  $("tabela").innerHTML =
+    "<thead><tr>" + cols.map((c) => `<th>${esc(c)}</th>`).join("") + "</tr></thead><tbody>" +
+    ult.map((l) => "<tr>" + cols.map((c) => {
+      const v = l[c];
+      if (c === "Data") return `<td>${esc(dataBR(v))}</td>`;
+      return `<td>${esc(typeof v === "number" ? (ehPct(c) && Math.abs(v) <= 1.5 ? FMT.pct(v) : FMT.num(v)) : fmtVal("txt", v))}</td>`;
+    }).join("") + "</tr>").join("") + "</tbody>";
+}
+
+async function mostrar(forcar = false) {
+  const cfg = ABAS.find((a) => a.id === abaAtual);
+  const dias = $("periodo").value;
+  $("msg").hidden = false; $("msg").className = ""; $("msg").textContent = "Carregando…";
+  $("conteudo").hidden = true;
+  try {
+    const d = await carregar(cfg.id, dias, forcar);
+    if (!d.linhas.length) { $("msg").textContent = "Sem dados no período."; return; }
+    renderKpis(cfg, d.linhas); renderGraficos(cfg, d.linhas); renderTabela(d.colunas, d.linhas);
+    const ultima = d.linhas[d.linhas.length - 1].Data;
+    $("info").textContent = `Último dado: ${dataBR(ultima)} · consultado às ${new Date(d.atualizadoEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    $("msg").hidden = true; $("conteudo").hidden = false;
+  } catch (e) {
+    if (e.message !== "sessão expirada") { $("msg").className = "erro"; $("msg").textContent = e.message; }
+  }
+}
+
+function montarAbas() {
+  $("abas").innerHTML = ABAS.map((a) => `<button data-id="${a.id}" class="${a.id === abaAtual ? "ativa" : ""}">${esc(a.nome)}</button>`).join("");
+  $("abas").onclick = (e) => {
+    const id = e.target.dataset && e.target.dataset.id;
+    if (!id) return;
+    abaAtual = id;
+    document.querySelectorAll("#abas button").forEach((b) => b.classList.toggle("ativa", b.dataset.id === id));
+    mostrar();
+  };
+}
+
+$("periodo").onchange = () => mostrar();
+$("btnAtualizar").onclick = () => { cache = {}; mostrar(true); };
+$("btnSair").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.href = "/login"; };
+
+(async () => {
+  const r = await fetch("/api/sessao");
+  if (r.status === 401) return sair401();
+  $("usuario").textContent = (await r.json()).usuario;
+  montarAbas();
+  mostrar();
+})();
+</script>
+</body>
+</html>
